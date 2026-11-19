@@ -421,7 +421,7 @@
                                 </select>
                             </label>
                             <label class="remark-text">Comment / remark
-                                <textarea name="remark" rows="3" maxlength="3000" placeholder="State what is being forwarded, or explain what must be corrected/resubmitted…" required>{{ old('remark') }}</textarea>
+                                <textarea name="remark" rows="3" maxlength="3000" placeholder="State what is being forwarded, or explain what must be corrected/resubmitted…" required>{{ $errors->hasAny(['action', 'remark']) ? old('remark') : '' }}</textarea>
                             </label>
                         </div>
                         @error('action')<small class="field-error">{{ $message }}</small>@enderror
@@ -434,14 +434,18 @@
                 @endif
 
                 <div class="evaluator-remark-timeline">
-                    @php $actionCounts = []; @endphp
+                    @php
+                        $actionCounts = [];
+                        $canReplyToRemarks = auth()->user()->canReplyToEvaluatorRemarks();
+                    @endphp
                     @forelse($proposal->evaluatorRemarks->sortBy('created_at') as $remark)
                         @php
                             $key = $remark->evaluator_id.'|'.$remark->action;
                             $actionCounts[$key] = ($actionCounts[$key] ?? 0) + 1;
                             $sequence = $actionCounts[$key];
+                            $repliesByParent = $remark->replies->groupBy('parent_reply_id');
                         @endphp
-                        <article class="evaluator-remark-item {{ strtolower($remark->action) }}">
+                        <article class="evaluator-remark-item notification-target {{ strtolower($remark->action) }}" id="evaluator-remark-{{ $remark->id }}">
                             <span class="remark-action">{{ $remark->action }} #{{ $sequence }}</span>
                             <div>
                                 <div class="remark-meta">
@@ -450,6 +454,24 @@
                                     <time>{{ $remark->created_at->format('M d, Y g:i A') }}</time>
                                 </div>
                                 <p>{{ $remark->remark }}</p>
+                                @if($isEvaluator && $currentEvaluator && auth()->user()->hasPermission('evaluator_portal.remarks')
+                                    && (int) $remark->user_id === (int) auth()->id()
+                                    && (int) $remark->evaluator_id === (int) $currentEvaluator->id)
+                                    @include('proposals.partials.evaluator-remark-edit', [
+                                        'url' => route('evaluator.proposals.remarks.update', [$proposal, $remark]),
+                                        'label' => 'Edit remark', 'field' => 'remark', 'value' => $remark->remark, 'maxLength' => 3000,
+                                        'errorBag' => 'editEvaluatorRemark'.$remark->id,
+                                    ])
+                                @endif
+                                @foreach($repliesByParent->get('', []) as $reply)
+                                    @include('proposals.partials.evaluator-remark-reply-thread', ['depth' => 0])
+                                @endforeach
+                                @if($canReplyToRemarks)
+                                    @include('proposals.partials.evaluator-remark-reply-form', [
+                                        'url' => route('proposals.evaluator-remarks.replies.store', [$proposal, $remark]),
+                                        'label' => 'Reply to this remark', 'errorBag' => 'evaluatorRemarkReply'.$remark->id,
+                                    ])
+                                @endif
                             </div>
                         </article>
                     @empty

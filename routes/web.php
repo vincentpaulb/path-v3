@@ -113,6 +113,8 @@ Route::middleware('auth')->group(function () {
         ->middleware('permission:liquidation.manage')->name('proposals.liquidation.budget-lines.update');
     Route::delete('/proposals/{proposal}/acquisition-liquidation/budget-lines/{budgetLine}', [ProposalLiquidationController::class, 'destroyBudgetLine'])
         ->middleware('permission:liquidation.manage')->name('proposals.liquidation.budget-lines.destroy');
+    Route::post('/proposals/{proposal}/acquisition-liquidation/realignments', [ProposalLiquidationController::class, 'storeRealignment'])
+        ->middleware('permission:liquidation.manage')->name('proposals.liquidation.realignments.store');
     Route::post('/proposals/{proposal}/acquisition-liquidation/acquisitions', [ProposalLiquidationController::class, 'storeAcquisition'])
         ->middleware('permission:liquidation.manage')->name('proposals.liquidation.acquisitions.store');
     Route::put('/proposals/{proposal}/acquisition-liquidation/acquisitions/{acquisition}', [ProposalLiquidationController::class, 'updateAcquisition'])
@@ -182,6 +184,12 @@ Route::middleware('auth')->group(function () {
     Route::post('/proposals/{proposal}/missing-documents', [InteractionController::class, 'missing'])->middleware('permission:proposals.missing_evaluation')->name('missing.store');
     Route::post('/proposals/{proposal}/complete-documents', [InteractionController::class, 'completeDocuments'])->middleware('permission:proposals.missing_evaluation')->name('documents.complete');
     Route::post('/proposals/{proposal}/comments', [InteractionController::class, 'comment'])->middleware('permission:proposals.comment')->name('comments.store');
+    Route::post('/proposals/{proposal}/evaluator-remarks/{evaluatorRemark}/replies', [InteractionController::class, 'replyToEvaluatorRemark'])
+        ->scopeBindings()->middleware('permission:proposals.comment')->name('proposals.evaluator-remarks.replies.store');
+    Route::post('/proposals/{proposal}/evaluator-remarks/{evaluatorRemark}/replies/{reply}/replies', [InteractionController::class, 'replyToEvaluatorRemark'])
+        ->scopeBindings()->middleware('permission:proposals.comment')->name('proposals.evaluator-remarks.replies.nested.store');
+    Route::patch('/proposals/{proposal}/evaluator-remarks/{evaluatorRemark}/replies/{reply}', [InteractionController::class, 'updateEvaluatorRemarkReply'])
+        ->scopeBindings()->middleware('permission:proposals.comment')->name('proposals.evaluator-remarks.replies.update');
     Route::delete('/comments/{comment}', [InteractionController::class, 'destroyComment'])->middleware('permission:proposals.comment')->name('comments.destroy');
     Route::post('/comments/{comment}/replies', [InteractionController::class, 'reply'])->middleware('permission:proposals.comment')->name('replies.store');
     Route::delete('/replies/{reply}', [InteractionController::class, 'destroyReply'])->middleware('permission:proposals.comment')->name('replies.destroy');
@@ -221,6 +229,12 @@ Route::middleware('auth')->group(function () {
     Route::get('/monitoring/liquidation', [LiquidationMonitoringController::class, 'index'])
         ->middleware('permission:monitoring.liquidation.view')
         ->name('monitoring.liquidation');
+    Route::get('/monitoring/liquidation/equipment-provided', [LiquidationMonitoringController::class, 'equipmentProvided'])
+        ->middleware('permission:monitoring.liquidation.view')
+        ->name('monitoring.liquidation.equipment-provided');
+    Route::get('/monitoring/liquidation/equipment-provided/export', [LiquidationMonitoringController::class, 'exportEquipmentProvided'])
+        ->middleware('permission:monitoring.liquidation.view')
+        ->name('monitoring.liquidation.equipment-provided.export');
     Route::patch('/monitoring/liquidation/{proposal}', [LiquidationMonitoringController::class, 'update'])
         ->middleware('permission:monitoring.liquidation.manage')
         ->name('monitoring.liquidation.update');
@@ -289,4 +303,6 @@ Route::middleware('auth')->group(function () {
     Route::get('/my-proposals/{proposal}', [EvaluatorPortalController::class, 'show'])->middleware('permission:evaluator_portal.view')->name('evaluator.proposals.show');
     Route::patch('/my-proposals/{proposal}/status', [EvaluatorPortalController::class, 'updateStatus'])->middleware('permission:evaluator_portal.update_status')->name('evaluator.proposals.status');
     Route::post('/my-proposals/{proposal}/remarks', [EvaluatorPortalController::class, 'remark'])->middleware('permission:evaluator_portal.remarks')->name('evaluator.proposals.remarks');
+    Route::patch('/my-proposals/{proposal}/remarks/{evaluatorRemark}', [EvaluatorPortalController::class, 'updateRemark'])
+        ->scopeBindings()->middleware('permission:evaluator_portal.remarks')->name('evaluator.proposals.remarks.update');
 });

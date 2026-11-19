@@ -3,6 +3,7 @@
 @section('page-title', 'Liquidation Monitoring')
 
 @section('top-actions')
+    <a class="btn" href="{{ route('monitoring.liquidation.equipment-provided') }}">Equipment Provided</a>
     @include('monitoring.partials.export-buttons', ['routeName' => 'monitoring.liquidation.export'])
 @endsection
 

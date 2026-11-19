@@ -4,7 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Models\LiquidationRecord;
 use App\Models\Proposal;
+use App\Models\ProposalAcquisition;
 use App\Services\ActivityService;
+use App\Services\MonitoringSpreadsheetExportService;
+use App\Support\DateRangeFilter;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -12,6 +16,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class LiquidationMonitoringController extends Controller
 {
@@ -19,7 +24,7 @@ class LiquidationMonitoringController extends Controller
 
     public function index(Request $request): View
     {
-        $range = new \App\Support\DateRangeFilter($request);
+        $range = new DateRangeFilter($request);
         $user = $request->user();
         $search = trim((string) $request->query('search', ''));
         $province = trim((string) $request->query('province', ''));
@@ -149,6 +154,72 @@ class LiquidationMonitoringController extends Controller
             'yearProjectCounts',
             'yearSummaries'
         ));
+    }
+
+    public function equipmentProvided(Request $request): View
+    {
+        [$year, $range] = $this->equipmentProvidedFilters($request);
+        $equipment = $this->equipmentProvidedQuery($request);
+        $years = (clone $equipment)->reorder()->whereNotNull('date_acquired')
+            ->selectRaw($this->yearExpression('date_acquired').' AS acquisition_year')
+            ->distinct()->orderByDesc('acquisition_year')->pluck('acquisition_year')->map(fn ($value) => (int) $value);
+        $filters = ['year' => $year, 'date_from' => $range->from, 'date_to' => $range->to];
+
+        return view('monitoring.equipment-provided', [
+            'equipment' => $range->apply($equipment, 'date_acquired', $year)->paginate(25)->appends($filters),
+            'years' => $years,
+            'filters' => $filters,
+            'canOpenDetailed' => $request->user()->hasPermission('liquidation.view'),
+        ]);
+    }
+
+    public function exportEquipmentProvided(Request $request, MonitoringSpreadsheetExportService $spreadsheet): BinaryFileResponse
+    {
+        [$year, $range] = $this->equipmentProvidedFilters($request);
+        $equipment = $range->apply($this->equipmentProvidedQuery($request), 'date_acquired', $year);
+        $path = $spreadsheet->createXlsx([
+            'title' => 'Equipment Provided',
+            'subtitle' => 'Date acquired: '.($range->active() || $year !== null ? $range->label($year) : 'All dates'),
+            'sections' => [[
+                'title' => 'Provided equipment',
+                'headers' => ['Equipment / Technology', 'Property No.', 'Project', 'Beneficiary', 'Province', 'Quantity', 'Unit', 'Purchased Amount', 'Date Acquired', 'Date Liquidated'],
+                'types' => ['text', 'text', 'text', 'text', 'text', 'number', 'text', 'money', 'date', 'date'],
+                'rows' => $equipment->lazy()->map(fn (ProposalAcquisition $item) => [
+                    $item->actual_item_name,
+                    $item->property_number,
+                    $item->proposal->project_title,
+                    $item->proposal->proponent,
+                    $item->proposal->province,
+                    $item->quantity,
+                    $item->unit ?: $item->budgetLine?->unit,
+                    $item->actual_cost,
+                    $item->date_acquired,
+                    $item->date_liquidated,
+                ])->all(),
+            ]],
+        ]);
+
+        return response()->download($path, 'equipment-provided.xlsx')->deleteFileAfterSend(true);
+    }
+
+    private function equipmentProvidedFilters(Request $request): array
+    {
+        $data = $request->validate(['year' => ['nullable', 'integer', 'min:1000', 'max:9999']]);
+
+        return [isset($data['year']) ? (int) $data['year'] : null, new DateRangeFilter($request)];
+    }
+
+    private function equipmentProvidedQuery(Request $request): Builder
+    {
+        return ProposalAcquisition::query()
+            ->whereHas('proposal', fn ($query) => $query->visibleTo($request->user())
+                ->whereNotNull('date_funded')
+                ->where('amount', '>', 0))
+            ->where(fn ($query) => $query->whereNotNull('date_acquired')
+                ->orWhereNotNull('date_liquidated')
+                ->orWhereIn('status', ['Acquired', 'For Liquidation', 'Liquidated']))
+            ->with(['proposal:id,project_title,proponent,province', 'budgetLine:id,unit'])
+            ->orderByDesc('date_acquired')->orderByDesc('id');
     }
 
     public function update(Request $request, Proposal $proposal): RedirectResponse

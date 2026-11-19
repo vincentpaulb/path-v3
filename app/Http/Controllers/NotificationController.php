@@ -109,6 +109,7 @@ class NotificationController extends Controller
         }
 
         $anchor = match (true) {
+            str_contains($action, 'evaluator remark') => 'evaluator-remarks',
             str_contains($action, 'discussion'),
             str_contains($action, 'comment'),
             str_contains($action, 'replied') => 'proposal-discussion-updates',

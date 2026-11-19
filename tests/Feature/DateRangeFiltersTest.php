@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Models\Permission;
 use App\Models\Proposal;
+use App\Models\Role;
 use App\Models\User;
 use App\Services\MonitoringPdfExportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -28,6 +30,98 @@ class DateRangeFiltersTest extends TestCase
         return Proposal::create(['project_title' => $name, 'proponent' => $name, 'province' => $province, 'sector' => 'SETUP', 'amount' => 36000,
             'status' => $status, 'document_status' => 'Complete', 'quarter_submitted' => 1, 'date_submitted' => $date, 'date_approved' => $date,
             'date_funded' => $date, 'user_id' => $this->admin->id]);
+    }
+
+    public function test_equipment_provided_filters_by_acquisition_date_and_keeps_undated_purchases_in_the_unfiltered_list(): void
+    {
+        $proposal = $this->proposal('Equipment beneficiary', '2025-08-15');
+        foreach ([
+            ['Boundary oven', '2026-01-01', null, 'Acquired'],
+            ['Boundary mixer', '2026-01-31', '2026-02-08', 'Liquidated'],
+            ['February sealer', '2026-02-01', null, 'Acquired'],
+            ['Previous year press', '2025-12-31', null, 'Acquired'],
+            ['Undated liquidated dryer', null, '2026-01-31', 'Liquidated'],
+            ['Pending scale', null, null, 'For Acquisition'],
+        ] as [$name, $acquired, $liquidated, $status]) {
+            $proposal->acquisitions()->create([
+                'actual_item_name' => $name, 'date_acquired' => $acquired, 'date_liquidated' => $liquidated, 'status' => $status,
+                'quantity' => 1, 'actual_cost' => 5000,
+            ]);
+        }
+        $route = 'monitoring.liquidation.equipment-provided';
+        $this->get(route('monitoring.liquidation'))->assertOk()->assertSee(route($route), false);
+        $this->get(route($route))->assertOk()
+            ->assertSeeInOrder(['February sealer', 'Boundary mixer', 'Boundary oven', 'Undated liquidated dryer'])
+            ->assertDontSee('Pending scale');
+        $this->get(route($route, ['year' => 2026]))->assertOk()
+            ->assertViewHas('years', fn ($years) => $years->all() === [2026, 2025])
+            ->assertSee('Boundary mixer')->assertSee('Boundary oven')->assertSee('February sealer')
+            ->assertDontSee('Previous year press')->assertDontSee('Undated liquidated dryer');
+        $this->get(route($route, ['year' => 2025, 'date_from' => '2026-01-01', 'date_to' => '2026-01-31']))->assertOk()
+            ->assertSee('Boundary oven')->assertSee('Boundary mixer')->assertDontSee('February sealer')->assertDontSee('Undated liquidated dryer');
+        $this->get(route($route, ['date_to' => '2026-01-01']))->assertOk()
+            ->assertSee('Boundary oven')->assertSee('Previous year press')->assertDontSee('Boundary mixer');
+        $this->getJson(route($route, ['date_from' => '2026-01-31', 'date_to' => '2026-01-01']))
+            ->assertUnprocessable()->assertJsonValidationErrors('date_to');
+    }
+
+    public function test_equipment_export_contains_every_matching_record_from_the_filtered_list(): void
+    {
+        $proposal = $this->proposal('Equipment export beneficiary', '2024-08-15');
+        for ($number = 1; $number <= 26; $number++) {
+            $proposal->acquisitions()->create([
+                'actual_item_name' => 'Filtered equipment '.$number,
+                'date_acquired' => '2026-01-18', 'status' => 'Acquired', 'quantity' => 2, 'actual_cost' => 5000,
+            ]);
+        }
+        $proposal->acquisitions()->create([
+            'actual_item_name' => 'Equipment outside range',
+            'date_acquired' => '2026-02-01', 'status' => 'Acquired', 'quantity' => 1, 'actual_cost' => 100,
+        ]);
+        $filters = ['year' => 2025, 'date_from' => '2026-01-01', 'date_to' => '2026-01-31'];
+        $downloadUrl = route('monitoring.liquidation.equipment-provided.export', $filters);
+        $this->get(route('monitoring.liquidation.equipment-provided', $filters + ['page' => 2]))
+            ->assertOk()->assertSee($downloadUrl)->assertSee('Filtered equipment 1')->assertDontSee('Filtered equipment 26');
+
+        $response = $this->get($downloadUrl)->assertOk()->assertDownload('equipment-provided.xlsx');
+        $path = $response->baseResponse->getFile()->getPathname();
+        $book = \PhpOffice\PhpSpreadsheet\IOFactory::load($path);
+        try {
+            $rows = collect($book->getActiveSheet()->toArray())->filter(fn ($row) => str_starts_with((string) $row[0], 'Filtered equipment '));
+            $this->assertCount(26, $rows);
+            $this->assertSame('Filtered equipment 26', $rows->first()[0]);
+            $this->assertSame('Filtered equipment 1', $rows->last()[0]);
+            $this->assertSame('2026-01-18', $rows->first()[8]);
+            $this->assertStringNotContainsString('Equipment outside range', implode(' ', array_column($book->getActiveSheet()->toArray(), 0)));
+        } finally {
+            $book->disconnectWorksheets();
+            unlink($path);
+        }
+    }
+
+    public function test_equipment_provided_respects_monitoring_permissions_and_province_scope(): void
+    {
+        foreach (['Cebu', 'Bohol'] as $province) {
+            $this->proposal($province.' proposal', '2026-01-01', 'Approved', $province)
+                ->acquisitions()->create([
+                    'actual_item_name' => $province.' machine', 'date_acquired' => '2026-01-02', 'status' => 'Acquired',
+                    'quantity' => 1, 'actual_cost' => 5000,
+                ]);
+        }
+
+        $role = Role::create(['name' => 'Province Monitoring', 'slug' => 'province-monitoring', 'data_scope' => 'province']);
+        $viewer = User::create([
+            'username' => 'province-monitoring', 'email' => 'province-monitoring@example.test',
+            'password' => 'TestPassword123!', 'first_name' => 'Province', 'last_name' => 'Viewer',
+            'role' => 'PSTO', 'role_id' => $role->id, 'province' => 'Cebu',
+        ]);
+        $page = route('monitoring.liquidation.equipment-provided');
+        $this->actingAs($viewer)->get($page)->assertForbidden();
+        $this->get(route('monitoring.liquidation.equipment-provided.export'))->assertForbidden();
+
+        $role->permissions()->attach(Permission::query()->where('key', 'monitoring.liquidation.view')->firstOrFail());
+        $this->actingAs($viewer->fresh())->get($page)->assertOk()
+            ->assertSee('Cebu machine')->assertDontSee('Bohol machine')->assertDontSee('/acquisition-liquidation', false);
     }
 
     public function test_dashboard_and_analytics_use_inclusive_dates_instead_of_year_and_quarter(): void

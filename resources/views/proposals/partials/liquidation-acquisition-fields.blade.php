@@ -4,10 +4,11 @@
 <div class="liquidation-form-grid">
     <label class="span-2">Approved equipment link
         <select name="budget_line_id">
-            <option value="">New / realigned equipment not in original approved list</option>
+            <option value="">Equipment without a plan item</option>
             @foreach($proposal->budgetLines as $line)
+                @continue($line->removed_by_realignment && (int) $acquisition?->budget_line_id !== $line->id)
                 <option value="{{ $line->id }}" @selected((string)old('budget_line_id', $acquisition?->budget_line_id) === (string)$line->id)>
-                    {{ $line->item_name }} · ₱{{ number_format((float)$line->approved_amount, 2) }}
+                    {{ $line->item_name }} · {{ $line->removed_by_realignment ? 'Removed by realignment' : '₱'.number_format($line->currentApprovedAmount(), 2) }}
                 </option>
             @endforeach
         </select>
@@ -31,6 +32,7 @@
 
     <label>Amount as realigned
         <input type="number" name="realigned_amount" min="0" step="0.01" value="{{ old('realigned_amount', $acquisition?->realigned_amount) }}" placeholder="Leave blank if not realigned">
+        <small class="field-help">A realignment recorded in the equipment plan supplies the amount for linked equipment.</small>
     </label>
 
     <label>Purchased amount

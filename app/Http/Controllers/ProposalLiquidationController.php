@@ -15,6 +15,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -23,6 +24,8 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class ProposalLiquidationController extends Controller
 {
+    private const REALIGNMENT_ACTION = 'Recorded equipment realignment';
+
     private const ACQUISITION_STATUSES = ['For Acquisition', 'Acquired', 'For Liquidation', 'Liquidated', 'Not Acquired'];
     private const TRANSACTION_TYPES = ['Obligation', 'Disbursement / Liquidation', 'Adjustment Increase', 'Adjustment Decrease', 'Refund', 'Reversal'];
     private const REFERENCE_TYPES = ['ORS/BURS', 'DV', 'JEV', 'OR', 'Sales Invoice', 'PO', 'Contract', 'Payroll', 'Acknowledgment Receipt', 'Other'];
@@ -61,6 +64,12 @@ class ProposalLiquidationController extends Controller
         return view('proposals.liquidation', [
             'proposal' => $proposal,
             'financials' => $financials,
+            'realignmentHistory' => $proposal->activities()
+                ->where('action', self::REALIGNMENT_ACTION)
+                ->with('user')
+                ->latest('created_at')
+                ->orderByDesc('id')
+                ->get(),
             'canManage' => $canManage,
             'canReview' => $canReview,
             'acquisitionStatuses' => self::ACQUISITION_STATUSES,
@@ -84,11 +93,14 @@ class ProposalLiquidationController extends Controller
     {
         $this->guardManage($request, $proposal);
         $this->owns($proposal, $budgetLine);
-        $before = $budgetLine->only(['budget_code', 'category', 'item_name', 'quantity', 'unit', 'approved_unit_cost', 'approved_amount', 'funding_source', 'fund_account']);
         $data = $this->budgetLineData($request, $proposal);
-        $data['sort_order'] = $budgetLine->sort_order;
-        $budgetLine->update($data);
-        $this->activity->record($proposal, $request->user(), 'Updated liquidation approved budget item', ['budget_line_id' => $budgetLine->id, 'before' => $before, 'after' => $budgetLine->fresh()->only(array_keys($before))]);
+        DB::transaction(function () use ($request, $proposal, $budgetLine, $data) {
+            $line = $proposal->budgetLines()->lockForUpdate()->findOrFail($budgetLine->id);
+            abort_if($line->added_by_realignment || $line->removed_by_realignment, 422);
+            $before = $line->only(['budget_code', 'category', 'item_name', 'quantity', 'unit', 'approved_unit_cost', 'approved_amount', 'funding_source', 'fund_account']);
+            $line->update(array_replace($data, ['sort_order' => $line->sort_order]));
+            $this->activity->record($proposal, $request->user(), 'Updated liquidation approved budget item', ['budget_line_id' => $line->id, 'before' => $before, 'after' => $line->fresh()->only(array_keys($before))]);
+        });
         return $this->backToLiquidation($proposal, 'Approved budget item updated.', 'approved-budget');
     }
 
@@ -96,13 +108,69 @@ class ProposalLiquidationController extends Controller
     {
         $this->guardManage($request, $proposal);
         $this->owns($proposal, $budgetLine);
-        if ($budgetLine->acquisitions()->exists() || $budgetLine->transactions()->exists()) {
-            return back()->with('warning', 'This budget item is already referenced by acquisition or ledger records and cannot be deleted.');
-        }
-        $name = $budgetLine->item_name;
-        $budgetLine->delete();
-        $this->activity->record($proposal, $request->user(), 'Deleted liquidation approved budget item', ['item' => $name]);
-        return $this->backToLiquidation($proposal, 'Approved budget item deleted.', 'approved-budget');
+        return DB::transaction(function () use ($request, $proposal, $budgetLine) {
+            $line = $proposal->budgetLines()->lockForUpdate()->findOrFail($budgetLine->id);
+            if ($line->realignmentStatus() !== null || $proposal->budgetLines()->where('realignment_source_id', $line->id)->exists()) {
+                return back()->with('warning', 'Use Realignment to remove this item from the current equipment plan.');
+            }
+            if ($line->acquisitions()->exists() || $line->transactions()->exists()) {
+                return back()->with('warning', 'This budget item is already referenced by acquisition or ledger records and cannot be deleted.');
+            }
+            $line->delete();
+            $this->activity->record($proposal, $request->user(), 'Deleted liquidation approved budget item', ['item' => $line->item_name]);
+            return $this->backToLiquidation($proposal, 'Approved budget item deleted.', 'approved-budget');
+        });
+    }
+
+    public function storeRealignment(Request $request, Proposal $proposal): RedirectResponse
+    {
+        $this->guardManage($request, $proposal);
+        $data = $request->validateWithBag('realignment', [
+            'operation' => ['required', Rule::in(['revise', 'add', 'remove'])],
+            'budget_line_id' => ['required', 'integer'],
+            'revised_amount' => ['exclude_unless:operation,revise', 'required', 'numeric', 'decimal:0,2', 'min:0', 'max:9999999999999.99'],
+        ]);
+        $operation = $data['operation'];
+        $addition = $operation === 'add' ? $this->budgetLineData($request, $proposal, 'realignment') : null;
+
+        DB::transaction(function () use ($request, $proposal, $data, $operation, $addition) {
+            $source = $proposal->budgetLines()->lockForUpdate()->find($data['budget_line_id']);
+            if (! $source || ! $source->canRealign($source->acquisitions()->exists())) {
+                throw ValidationException::withMessages([
+                    'budget_line_id' => 'Select originally approved equipment with no acquisition records that is still in the current plan.',
+                ])->errorBag('realignment');
+            }
+
+            if ($operation === 'add') {
+                $line = $proposal->budgetLines()->create(array_replace($addition, [
+                    'approved_amount' => 0,
+                    'approved_unit_cost' => 0,
+                    'realigned_amount' => $addition['approved_amount'],
+                    'added_by_realignment' => true,
+                    'realignment_source_id' => $source->id,
+                    'created_by' => $request->user()->id,
+                ]));
+                $before = null;
+            } else {
+                $line = $source;
+                $before = $line->currentApprovedAmount();
+                $line->update($operation === 'remove'
+                    ? ['removed_by_realignment' => true]
+                    : ['realigned_amount' => $data['revised_amount']]);
+            }
+
+            $this->activity->record($proposal, $request->user(), self::REALIGNMENT_ACTION, [
+                'operation' => $operation,
+                'budget_line_id' => $line->id,
+                'original_budget_line_id' => $source->id,
+                'original_item' => $source->item_name,
+                'item' => $line->item_name,
+                'previous_amount' => $before,
+                'current_amount' => $line->currentApprovedAmount(),
+            ]);
+        });
+
+        return $this->backToLiquidation($proposal, 'Equipment realignment saved.', 'approved-budget');
     }
 
     public function storeAcquisition(Request $request, Proposal $proposal): RedirectResponse
@@ -110,6 +178,7 @@ class ProposalLiquidationController extends Controller
         $this->guardManage($request, $proposal);
         $data = $this->acquisitionData($request, $proposal);
         $acquisition = DB::transaction(function () use ($proposal, $request, $data) {
+            $this->ensureActiveAcquisitionLink($proposal, $data['budget_line_id'] ?? null);
             $acquisition = $proposal->acquisitions()->create($data + ['created_by' => $request->user()->id]);
             $this->syncMonitoringRecord($proposal, $request);
             return $acquisition;
@@ -124,7 +193,12 @@ class ProposalLiquidationController extends Controller
         $this->owns($proposal, $acquisition);
         $before = $acquisition->only(['budget_line_id', 'supplier_name', 'actual_item_name', 'specifications_liquidated', 'quantity', 'unit', 'realigned_amount', 'actual_cost', 'property_number', 'date_acquired', 'date_liquidated', 'status']);
         DB::transaction(function () use ($acquisition, $request, $proposal) {
-            $acquisition->update($this->acquisitionData($request, $proposal));
+            $data = $this->acquisitionData($request, $proposal);
+            $current = $proposal->acquisitions()->lockForUpdate()->findOrFail($acquisition->id);
+            if ((int) ($data['budget_line_id'] ?? 0) !== (int) $current->budget_line_id) {
+                $this->ensureActiveAcquisitionLink($proposal, $data['budget_line_id'] ?? null);
+            }
+            $current->update($data);
             $this->syncMonitoringRecord($proposal, $request);
         });
         $this->activity->record($proposal, $request->user(), 'Updated equipment / technology acquisition', ['acquisition_id' => $acquisition->id, 'before' => $before, 'after' => $acquisition->fresh()->only(array_keys($before))]);
@@ -310,24 +384,34 @@ class ProposalLiquidationController extends Controller
             'Date Approved', 'SETUP Fund Released', 'Date Released',
             'Equipment / Technology Acquired', 'Specifications as approved', 'Specifications as liquidated',
             'Quantity', 'Unit', 'Amount as approved', 'Amount as realigned', 'Purchased Amount', 'Balance',
-            'SETUP Property No.', 'Date Liquidated', 'Name of Supplier', 'Date Acquired', 'Remarks',
+            'SETUP Property No.', 'Date Liquidated', 'Name of Supplier', 'Date Acquired', 'Remarks', 'Realignment Status', 'Realigned From',
         ];
         $sheet->fromArray($headers, null, 'A1');
 
         $row = 2;
         $writtenBudgetIds = [];
+        $budgetLinesById = $proposal->budgetLines->keyBy('id');
+        $purchasedByBudgetLine = $proposal->acquisitions->whereNotNull('budget_line_id')
+            ->groupBy('budget_line_id')->map->sum('actual_cost');
 
         foreach ($proposal->acquisitions->sortBy('id') as $acquisition) {
             $line = $acquisition->budgetLine;
+            $firstForLine = $line && ! isset($writtenBudgetIds[$line->id]);
             if ($line) {
                 $writtenBudgetIds[$line->id] = true;
             }
 
-            $approved = $line ? (float) $line->approved_amount : null;
+            $approved = $line && ! $line->added_by_realignment ? (float) $line->approved_amount : null;
             $realigned = $acquisition->realigned_amount !== null ? (float) $acquisition->realigned_amount : null;
             $purchased = (float) $acquisition->actual_cost;
             $basis = $realigned !== null ? $realigned : $approved;
             $balance = $basis !== null ? $basis - $purchased : null;
+            $status = $line?->realignmentStatus();
+            if ($status !== null) {
+                $approved = $firstForLine ? $approved : null;
+                $realigned = $firstForLine && ! $line->removed_by_realignment ? $line->currentApprovedAmount() : null;
+                $balance = $realigned !== null ? $realigned - (float) $purchasedByBudgetLine[$line->id] : null;
+            }
 
             $sheet->fromArray([
                 $proposal->province,
@@ -352,10 +436,12 @@ class ProposalLiquidationController extends Controller
                 $acquisition->supplier_name,
                 $acquisition->date_acquired?->format('Y-m-d'),
                 $acquisition->remarks,
-            ], null, 'A'.$row++);
+                $status,
+                $budgetLinesById->get($line?->realignment_source_id)?->item_name,
+            ], null, 'A'.$row++, true);
         }
 
-        // Keep originally approved items visible even when they were never acquired.
+        // Include equipment plan items that have no linked acquisition.
         foreach ($proposal->budgetLines as $line) {
             if (isset($writtenBudgetIds[$line->id])) {
                 continue;
@@ -375,21 +461,23 @@ class ProposalLiquidationController extends Controller
                 null,
                 (float) $line->quantity,
                 $line->unit,
-                (float) $line->approved_amount,
+                $line->added_by_realignment ? null : (float) $line->approved_amount,
+                $line->realigned_amount !== null && ! $line->removed_by_realignment ? $line->currentApprovedAmount() : null,
                 null,
                 null,
                 null,
                 null,
                 null,
                 null,
-                null,
-                'Approved / proposed item; no acquisition recorded.',
-            ], null, 'A'.$row++);
+                'No acquisition recorded.',
+                $line->realignmentStatus(),
+                $budgetLinesById->get($line->realignment_source_id)?->item_name,
+            ], null, 'A'.$row++, true);
         }
 
         $sheet->freezePane('A2');
-        $sheet->getStyle('A1:V1')->getFont()->setBold(true);
-        for ($col = 1; $col <= 22; $col++) {
+        $sheet->getStyle('A1:'.Coordinate::stringFromColumnIndex(count($headers)).'1')->getFont()->setBold(true);
+        for ($col = 1; $col <= count($headers); $col++) {
             $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($col))->setAutoSize(true);
         }
 
@@ -401,14 +489,14 @@ class ProposalLiquidationController extends Controller
         return response()->download($path, $filename)->deleteFileAfterSend(true);
     }
 
-    private function budgetLineData(Request $request, Proposal $proposal): array
+    private function budgetLineData(Request $request, Proposal $proposal, string $errorBag = 'default'): array
     {
-        $data = $request->validate([
+        $data = $request->validateWithBag($errorBag, [
             'item_name' => ['required', 'string', 'max:500'],
             'description' => ['nullable', 'string', 'max:5000'],
             'quantity' => ['required', 'numeric', 'gt:0', 'max:999999999'],
             'unit' => ['nullable', 'string', 'max:80'],
-            'approved_amount' => ['required', 'numeric', 'min:0', 'max:9999999999999.99'],
+            'approved_amount' => ['required', 'numeric', 'min:0', 'max:9999999999999.99', ...($errorBag === 'realignment' ? ['decimal:0,2'] : [])],
         ]);
 
         $quantity = max(0.01, (float) $data['quantity']);
@@ -417,6 +505,18 @@ class ProposalLiquidationController extends Controller
         $data['sort_order'] = ($proposal->budgetLines()->max('sort_order') ?? 0) + 10;
 
         return $data;
+    }
+
+    private function ensureActiveAcquisitionLink(Proposal $proposal, ?int $budgetLineId): void
+    {
+        if ($budgetLineId === null) {
+            return;
+        }
+
+        $line = $proposal->budgetLines()->lockForUpdate()->find($budgetLineId);
+        if (! $line || $line->removed_by_realignment) {
+            throw ValidationException::withMessages(['budget_line_id' => 'Select an item in the current equipment plan.']);
+        }
     }
 
     private function acquisitionData(Request $request, Proposal $proposal): array
@@ -483,7 +583,9 @@ class ProposalLiquidationController extends Controller
 
         $released = $record?->amount_released !== null ? (float) $record->amount_released : (float) $proposal->amount;
         $approvedEquipment = (float) $budgetLines->sum('approved_amount');
-        $realigned = (float) $acquisitions->sum(fn ($acquisition) => (float) ($acquisition->realigned_amount ?? 0));
+        $budgetLinesById = $budgetLines->keyBy('id');
+        $realigned = $budgetLines->whereNotNull('realigned_amount')->sum(fn ($line) => $line->currentApprovedAmount())
+            + $acquisitions->sum(fn ($acquisition) => $budgetLinesById->get($acquisition->budget_line_id)?->realignmentStatus() === null ? (float) $acquisition->realigned_amount : 0);
         $purchased = (float) $acquisitions->sum('actual_cost');
 
         // Equipment Database rule: Purchased Amount becomes liquidated only when Date Liquidated is supplied.
@@ -503,6 +605,7 @@ class ProposalLiquidationController extends Controller
             'released' => $released,
             'approved_equipment' => $approvedEquipment,
             'realigned_amount' => $realigned,
+            'current_approved_equipment' => $budgetLines->sum(fn ($line) => $line->currentApprovedAmount()),
             'purchased_amount' => $purchased,
             'liquidated' => $liquidated,
             'fund_balance' => $fundBalance,

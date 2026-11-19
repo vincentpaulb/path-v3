@@ -3,15 +3,19 @@
 namespace App\Http\Controllers;
 
 use App\Models\Comment;
+use App\Models\EvaluatorRemark;
+use App\Models\EvaluatorRemarkReply;
 use App\Models\Proposal;
 use App\Models\ProposalFile;
 use App\Models\ProposalDocumentStatus;
 use App\Models\RequiredDocument;
 use App\Models\Reply;
 use App\Services\ActivityService;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 
 class InteractionController extends Controller
 {
@@ -161,6 +165,75 @@ class InteractionController extends Controller
         $this->activity->record($comment->proposal, $request->user(), 'Replied to a proposal discussion');
 
         return back()->with('success', 'Reply posted.');
+    }
+
+    public function replyToEvaluatorRemark(Request $request, Proposal $proposal, EvaluatorRemark $evaluatorRemark, ?EvaluatorRemarkReply $reply = null): RedirectResponse
+    {
+        $this->guardEvaluatorRemarkReply($request, $proposal);
+        $user = $request->user();
+
+        $url = route('proposals.show', $proposal);
+        $anchor = $reply ? '#evaluator-remark-reply-'.$reply->id : '#evaluator-remark-'.$evaluatorRemark->id;
+        $errorBag = $reply ? 'nestedEvaluatorRemarkReply'.$reply->id : 'evaluatorRemarkReply'.$evaluatorRemark->id;
+        try {
+            $data = $request->validateWithBag($errorBag, [
+                'content' => ['required', 'string', 'max:2000'],
+            ]);
+        } catch (ValidationException $exception) {
+            throw $exception->redirectTo($url.$anchor);
+        }
+
+        $postedReply = DB::transaction(function () use ($data, $evaluatorRemark, $proposal, $user, $reply) {
+            $postedReply = $evaluatorRemark->replies()->create($data + [
+                'user_id' => $user->id,
+                'parent_reply_id' => $reply?->id,
+            ]);
+            $this->activity->record($proposal, $user, 'Posted an evaluator remark reply', [
+                'evaluator_remark_id' => $evaluatorRemark->id,
+                'reply_id' => $postedReply->id,
+            ]);
+
+            return $postedReply;
+        });
+
+        return redirect()->to($url.($reply ? '#evaluator-remark-reply-'.$postedReply->id : $anchor))->with('success', 'Reply posted.');
+    }
+
+    public function updateEvaluatorRemarkReply(Request $request, Proposal $proposal, EvaluatorRemark $evaluatorRemark, EvaluatorRemarkReply $reply): RedirectResponse
+    {
+        $this->guardEvaluatorRemarkReply($request, $proposal);
+        $user = $request->user();
+        abort_unless((int) $reply->user_id === (int) $user->id, 403);
+
+        $url = route('proposals.show', $proposal).'#evaluator-remark-reply-'.$reply->id;
+        try {
+            $data = $request->validateWithBag('editEvaluatorRemarkReply'.$reply->id, [
+                'content' => ['required', 'string', 'max:2000'],
+            ]);
+        } catch (ValidationException $exception) {
+            throw $exception->redirectTo($url);
+        }
+
+        DB::transaction(function () use ($data, $evaluatorRemark, $proposal, $reply, $user) {
+            $reply->update($data);
+            if ($reply->wasChanged('content')) {
+                $this->activity->record($proposal, $user, 'Edited an evaluator remark reply', [
+                    'evaluator_remark_id' => $evaluatorRemark->id,
+                    'reply_id' => $reply->id,
+                ]);
+            }
+        });
+
+        return redirect()->to($url)->with('success', 'Reply updated.');
+    }
+
+    private function guardEvaluatorRemarkReply(Request $request, Proposal $proposal): void
+    {
+        $this->guardProposal($request, $proposal);
+        $user = $request->user();
+        abort_unless($user->canReplyToEvaluatorRemarks() && (
+            $user->hasPermission('proposals.view') || ($proposal->isFunded() && $user->hasPermission('funded.view'))
+        ), 403);
     }
 
     public function destroyComment(Request $request, Comment $comment)

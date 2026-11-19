@@ -239,6 +239,7 @@ class ArchiveController extends Controller
             || DB::table('missing_documents')->where('created_by', $id)->exists()
             || DB::table('comments')->where('user_id', $id)->exists()
             || DB::table('replies')->where('user_id', $id)->exists()
+            || DB::table('evaluator_remark_replies')->where('user_id', $id)->exists()
             || DB::table('proposal_files')->where('uploaded_by', $id)->exists()
             || DB::table('evaluator_remarks')->where('user_id', $id)->exists();
     }

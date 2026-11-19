@@ -117,6 +117,11 @@ class User extends Authenticatable
         return $this->role === 'PSTO' || $this->roleSlug() === 'psto' || $this->dataScope() === 'province';
     }
 
+    public function canReplyToEvaluatorRemarks(): bool
+    {
+        return in_array($this->roleSlug(), ['psto', 'tod'], true) && $this->hasPermission('proposals.comment');
+    }
+
     public function homeRouteName(): string
     {
         if ($this->hasPermission('dashboard.view')) {

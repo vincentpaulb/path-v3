@@ -184,6 +184,7 @@ class ProposalController extends Controller
             'evaluators',
             'evaluatorRemarks.evaluator',
             'evaluatorRemarks.user',
+            'evaluatorRemarks.replies.user',
             'missingDocuments.creator',
             'documentStatuses.requiredDocument',
             'comments.user',

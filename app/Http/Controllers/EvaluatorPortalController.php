@@ -7,9 +7,11 @@ use App\Models\EvaluatorRemark;
 use App\Models\Proposal;
 use App\Models\RequiredDocument;
 use App\Services\ActivityService;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class EvaluatorPortalController extends Controller
 {
@@ -80,6 +82,7 @@ class EvaluatorPortalController extends Controller
             'evaluators',
             'evaluatorRemarks.evaluator',
             'evaluatorRemarks.user',
+            'evaluatorRemarks.replies.user',
             'missingDocuments.creator',
             'documentStatuses.requiredDocument',
             'comments.user',
@@ -183,5 +186,34 @@ class EvaluatorPortalController extends Controller
         );
 
         return back()->with('success', "{$data['action']} #{$sequence} remark added.");
+    }
+
+    public function updateRemark(Request $request, Proposal $proposal, EvaluatorRemark $evaluatorRemark): RedirectResponse
+    {
+        $evaluator = $this->evaluator($request);
+        $this->ensureAssigned($evaluator, $proposal);
+        abort_unless((int) $evaluatorRemark->user_id === (int) $request->user()->id
+            && (int) $evaluatorRemark->evaluator_id === (int) $evaluator->id, 403);
+
+        $url = route('evaluator.proposals.show', $proposal).'#evaluator-remark-'.$evaluatorRemark->id;
+        try {
+            $data = $request->validateWithBag('editEvaluatorRemark'.$evaluatorRemark->id, [
+                'remark' => ['required', 'string', 'max:3000'],
+            ]);
+        } catch (ValidationException $exception) {
+            throw $exception->redirectTo($url);
+        }
+
+        DB::transaction(function () use ($data, $evaluatorRemark, $evaluator, $proposal, $request) {
+            $evaluatorRemark->update($data);
+            if ($evaluatorRemark->wasChanged('remark')) {
+                $this->activity->record($proposal, $request->user(), 'Edited an evaluator remark', [
+                    'evaluator_id' => $evaluator->id,
+                    'evaluator_remark_id' => $evaluatorRemark->id,
+                ]);
+            }
+        });
+
+        return redirect()->to($url)->with('success', 'Remark updated.');
     }
 }

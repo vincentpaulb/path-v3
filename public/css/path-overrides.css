@@ -2090,3 +2090,116 @@ tr.notification-target:target td{animation:path-notification-target-row 2.4s eas
  .user-directory-filter-row>.date-range-filter{grid-column:1}
  .date-range-filter{width:100%;flex:1 1 100%}
 }
+.equipment-plan-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.equipment-realignment-fields > fieldset,
+.equipment-realignment-message,
+.equipment-realignment-errors {
+    grid-column: 1 / -1;
+}
+
+.equipment-realignment-message {
+    margin: 0;
+}
+
+#realignment-history {
+    scroll-margin-top: 88px;
+}
+
+.equipment-realignment-fields > fieldset {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.equipment-realignment-fields fieldset .liquidation-form-grid {
+    padding: 0;
+}
+
+.equipment-realignment-fields .field-help {
+    margin-bottom: 0;
+}
+
+.equipment-realignment-errors {
+    margin: 0;
+    padding-inline-start: 20px;
+    color: #a32b2b;
+}
+.liquidation-monitor-filters.equipment-provided-filters {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+}
+
+.equipment-date-help {
+    grid-column: 1 / -1;
+    margin: 0;
+    color: #526b77;
+    font-size: 12px;
+}
+
+.liquidation-data-table.equipment-provided-table {
+    min-width: 760px;
+}
+
+.equipment-provided-pagination {
+    padding: 12px 17px;
+}
+.evaluator-remark-reply {
+    margin-top: 10px;
+    overflow-wrap: anywhere;
+}
+
+.evaluator-remark-reply-form {
+    margin-top: 12px;
+}
+
+.evaluator-remark-reply-form > .evaluator-remark-action {
+    display: grid;
+    margin-inline-start: auto;
+    border: 0;
+    background: transparent;
+    list-style: none;
+}
+
+.evaluator-remark-reply-form > .evaluator-remark-action:hover {
+    color: var(--navy);
+}
+
+.evaluator-remark-reply-form > .evaluator-remark-action:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
+}
+
+.evaluator-remark-action::-webkit-details-marker {
+    display: none;
+}
+
+.evaluator-remark-reply-form .remark-form-actions {
+    justify-content: flex-end;
+}
+
+.evaluator-reply-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.evaluator-reply-actions > details {
+    border: 0;
+    padding-top: 0;
+}
+
+.evaluator-reply-actions > details[open] {
+    flex-basis: 100%;
+}
+
+.evaluator-reply-children {
+    margin-inline-start: 12px;
+    padding-inline-start: 10px;
+    border-inline-start: 2px solid #dce5ea;
+}
