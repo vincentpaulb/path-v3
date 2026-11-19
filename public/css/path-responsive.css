@@ -1,0 +1,97 @@
+﻿/* Shared responsive rules, loaded after page-specific styles. */
+.main,.content,.panel,.record-main,.record-side,.form-layout,.form-grid>*,.detail-grid>*,.metric-grid>*,.grid>*{min-width:0}
+.content{width:100%;max-width:1920px}
+.top-left,.top-actions{min-width:0}
+.top-actions{flex-wrap:wrap;justify-content:flex-end}
+.topbar{height:auto;min-height:64px;gap:12px}
+.page-intro,.panel-head{flex-wrap:wrap}
+.page-intro{gap:12px}
+.form-grid input:not([type=checkbox]):not([type=radio]),.form-grid select,.form-grid textarea{max-width:100%;min-width:0}
+.detail-grid dd,.proposal-contact-strip,.equipment-record-head h3{overflow-wrap:anywhere}
+.table-wrap,[class$="table-wrap"],.audit-trail-scroll{max-width:100%;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+.filter-bar,.year-select,.rtec-year-filter,.refund-monitor-filters{flex-wrap:wrap}
+.filter-bar>input,.filter-bar>select{min-width:0;max-width:100%}
+.date-range-filter>a{position:static;grid-column:1/-1;justify-self:end;white-space:normal}
+.rental-proposal-filters{grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr))}
+.rental-proposal-filters>.date-range-filter{grid-column:span 2;width:100%;max-width:100%}
+.rental-filter-actions{flex-wrap:wrap}
+.panel-head>*,.page-intro>*{min-width:0}
+.form-actions{flex-wrap:wrap;gap:8px}
+dialog{max-width:calc(100vw - 24px);max-height:calc(100dvh - 24px);overflow:auto}
+@media(max-width:1200px){
+ .topbar{padding:10px 18px;flex-wrap:wrap}
+ .top-actions{margin-left:auto}
+ .content{padding:20px 18px 32px}
+ .rtec-kpi-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+ .annual-heading{align-items:flex-start;flex-wrap:wrap}
+ .annual-period{flex-wrap:wrap;max-width:100%}
+ .annual-grid{grid-template-columns:1fr}
+ .annual-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
+ .rental-sheet-layout,.rtec-grid-two{grid-template-columns:1fr}
+}
+@media(max-width:900px){
+ .main,body.collapsed .main{width:100%;margin-left:0}
+ .sidebar{max-width:calc(100vw - 48px);height:100dvh;overflow-y:auto;overscroll-behavior:contain}
+ .topbar{position:relative;align-items:flex-start}
+ .top-left{flex:1 1 220px}
+ .top-actions{flex:1 1 100%;justify-content:flex-start;margin-left:0}
+ .top-actions .btn{white-space:normal}
+ .filter-bar{align-items:end}
+ .filter-bar>input,.filter-bar>select,.filter-bar>label{flex:1 1 150px}
+ .filter-bar>.date-range-filter{flex:1 1 100%;width:100%}
+ .grid.two,.record-layout,.dashboard-chart-grid,.rtec-status-grid{grid-template-columns:1fr}
+ .metric-grid,.metric-grid.three{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .year-select{max-width:100%;width:100%}
+ .hero-panel{align-items:flex-start;padding:20px;gap:16px}
+ .path-notification-dropdown{position:fixed;top:70px;right:12px;left:auto;width:min(390px,calc(100vw - 24px));max-height:calc(100dvh - 90px)}
+}
+@media(max-width:600px){
+ .content{padding:14px 12px 28px}
+ .topbar{padding:10px 12px}
+ .topbar b{font-size:14px}
+ .top-actions{gap:7px}
+ .top-actions .date-chip{font-size:11px}
+ .panel{padding:14px}
+ .table-panel{padding:0}
+ .page-intro{align-items:flex-start;flex-direction:column}
+ .page-intro h1,.form-heading h1,.hero-panel h1{font-size:22px;overflow-wrap:anywhere}
+ .form-grid,.record-main .detail-grid,.detail-grid,.rental-adjust-grid,.rtec-fund-grid,.bulk-import-upload-grid{grid-template-columns:minmax(0,1fr)}
+ .form-grid .span-2,.form-grid [style*="span 2"]{grid-column:1/-1}
+ .form-layout{width:100%;max-width:100%}
+ .filter-bar{gap:10px}
+ .filter-bar>input,.filter-bar>select{width:100%;flex-basis:100%}
+ .filter-bar>.btn{flex:1 1 auto}
+ .date-range-filter{width:100%;max-width:100%;flex:1 1 100%;grid-template-columns:repeat(2,minmax(0,1fr))}
+ .rental-proposal-filters{grid-template-columns:repeat(2,minmax(0,1fr));padding:12px}
+ .rental-proposal-filters>label:first-child,.rental-proposal-filters>.date-range-filter,.rental-proposal-filters>.rental-filter-actions{grid-column:1/-1}
+ .rtec-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .annual-period{width:100%;gap:8px}
+ .annual-period .date-range-filter{flex:1 1 100%;width:100%}
+ .annual-period>label{flex:1}
+ .annual-visual-filters{flex-wrap:wrap}
+ .annual-visual-filters label{flex:1 1 130px}
+ .annual-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .annual-status-summary{grid-column:1/-1}
+ .annual-visual-pair,.annual-finance-charts{grid-template-columns:1fr}
+ .annual-rate table{white-space:normal}
+ .annual-rate th,.annual-rate td{padding:8px 6px;font-size:10px}
+ .annual-no-refund-row{grid-template-columns:80px minmax(0,1fr) 20px}
+ .pagination nav>div:last-child{flex-wrap:wrap;gap:10px}
+ .pagination{max-width:100%;overflow-x:auto}
+ .sector-row{grid-template-columns:50px minmax(0,1fr) 25px}.sector-row>small{grid-column:2/-1}
+ .activity-list>a{grid-template-columns:12px minmax(0,1fr)}.activity-list time{grid-column:2}
+ .btn,button.status-edit,.status-action,.rental-adjustment-controls .rental-adjustment-icon{min-height:44px}
+ .rental-adjustment-controls .rental-adjustment-icon{min-width:44px}
+ .rental-adjustment-item:has(.rental-adjustment-controls){grid-template-columns:minmax(0,1fr) 44px}
+ input:not([type=checkbox]):not([type=radio]):not([type=hidden]),select,textarea{font-size:16px;max-width:100%}
+ .annual-dashboard select,.annual-dashboard input[type=date],.date-range-filter input[type=date]{font-size:16px;height:44px}
+ .annual-dashboard .btn{height:auto;min-height:44px}
+}
+@media(max-width:380px){
+ .metric-grid,.metric-grid.three,.province-cards,.annual-kpis,.rtec-kpi-grid{grid-template-columns:1fr}
+ .annual-status-summary{grid-column:auto}
+ .rental-proposal-filters{grid-template-columns:1fr}
+ .date-range-filter{grid-template-columns:1fr}
+ .annual-period .date-range-filter{grid-template-columns:1fr}
+}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.sidebar,.sidebar-backdrop{transition:none}}

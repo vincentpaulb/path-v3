@@ -1,0 +1,5 @@
+@extends('errors.layout')
+@section('code', '500')
+@section('kicker', 'SYSTEM ERROR')
+@section('title', 'The request could not be completed.')
+@section('message', 'An unexpected problem occurred. Your data has not been intentionally changed; return to PATH and try again.')

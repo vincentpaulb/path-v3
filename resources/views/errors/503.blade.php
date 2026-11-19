@@ -1,0 +1,5 @@
+@extends('errors.layout')
+@section('code', '503')
+@section('kicker', 'TEMPORARILY UNAVAILABLE')
+@section('title', 'PATH is currently unavailable.')
+@section('message', 'The system may be undergoing maintenance. Please try again shortly.')

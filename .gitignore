@@ -1,0 +1,17 @@
+/.phpunit.cache
+/node_modules
+/public/build
+/public/hot
+/public/storage
+/storage/*.key
+/vendor
+.env
+.env.backup
+.phpunit.result.cache
+/storage/app/private/webpush-vapid.json
+
+# Local database exports and editor recovery files
+/*.sql
+*.bak
+*.tmp
+*.swp

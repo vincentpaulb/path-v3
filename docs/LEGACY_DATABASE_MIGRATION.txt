@@ -1,0 +1,153 @@
+PATH LEGACY DATABASE MIGRATION GUIDE
+====================================
+
+Purpose
+-------
+Merge records from the old PATH database into the current Laravel PATH database
+without deleting existing users, proposals, monitoring data, or configuration.
+
+The importer is idempotent: running it again reuses records it can identify and
+does not intentionally duplicate previously imported rows.
+
+
+PREREQUISITES
+-------------
+1. A complete legacy SQL export containing both Structure and Data.
+2. The current Laravel application and its database must already be working.
+3. MySQL client tools (mysql and mysqldump) must be installed.
+4. Run all commands from the path-v3 project directory.
+
+
+IMPORTANT SAFETY RULES
+----------------------
+1. Never import the legacy dump directly into path13. The old and new databases
+   contain tables with the same names but incompatible columns.
+2. Always back up path13 before a merge.
+3. Always run the importer with --dry-run first.
+4. Keep the legacy database separate from path13.
+
+
+STEP 1 - EXPORT THE OLD DATABASE
+--------------------------------
+In phpMyAdmin, select the old PATH database, choose Export > Custom, and enable:
+
+- Structure
+- Data
+- Add DROP TABLE / VIEW / PROCEDURE / FUNCTION / EVENT statement (optional when
+  importing into a new empty staging database)
+
+Confirm the resulting SQL file contains lines beginning with "INSERT INTO".
+
+
+STEP 2 - BACK UP THE CURRENT DATABASE
+-------------------------------------
+Example using the Laragon MySQL installation:
+
+  C:\laragon\bin\mysql\mysql-8.4.3-winx64\bin\mysqldump.exe ^
+    -uroot --single-transaction --routines --triggers --events ^
+    --default-character-set=utf8mb4 ^
+    --result-file=C:\laragon\www\path-v3\backups\path13_before_merge.sql path13
+
+If the MySQL root account has a password, add -p and enter it when requested.
+Do not put a database password inside this text file or a source-controlled script.
+
+
+STEP 3 - CREATE A SEPARATE LEGACY STAGING DATABASE
+--------------------------------------------------
+In phpMyAdmin, create a database such as:
+
+  path_legacy_import
+
+Use utf8mb4 and import the complete old SQL file into that database. Do not select
+path13 as the import destination.
+
+Command-line alternative:
+
+  C:\laragon\bin\mysql\mysql-8.4.3-winx64\bin\mysql.exe -uroot -e ^
+    "CREATE DATABASE IF NOT EXISTS path_legacy_import CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;"
+
+Then import the dump through phpMyAdmin, or use the MySQL client's source command.
+
+
+STEP 4 - RUN A DRY RUN
+----------------------
+From C:\laragon\www\path-v3 run:
+
+  php artisan legacy:merge --source=path_legacy_import --dry-run
+
+The command performs the full merge inside a transaction, prints a report, and
+rolls back every target-database change. Review all skipped and unresolved counts.
+
+The target database must have an Admin user. To use a specific existing user for
+orphaned ownership and unresolved legacy authors, add:
+
+  --fallback-user=USER_ID
+
+
+STEP 5 - EXECUTE THE MERGE
+--------------------------
+After the dry-run report is acceptable:
+
+  php artisan legacy:merge --source=path_legacy_import
+
+Do not close the terminal until "Legacy merge committed successfully" appears.
+If an exception occurs, the importer rolls back the target transaction.
+
+
+WHAT THE IMPORTER MAPS
+----------------------
+Old users                  -> users
+Old documents              -> proposals
+Old lacking_documents      -> missing_documents
+Old comments               -> comments
+Old replies                -> replies
+Old history                -> activity_logs
+
+Existing users are matched by username and then email. Existing proposals are
+matched by proposal title and proponent. Related rows use in-memory old-to-new ID
+maps so foreign keys remain valid.
+
+Legacy funding values are normalized as follows:
+
+Cheque Released to Client / Cheque Received -> Cheque Released
+Cheque Ready for Releasing                  -> Ongoing Processing
+Blank or unsupported values                 -> no funding status
+
+Legacy quarter names are converted to numbers 1 through 4. Zero dates such as
+0000-00-00 are converted to NULL where the new schema permits it.
+
+
+EXPECTED SKIPPED RECORDS
+------------------------
+Historical dumps can contain comments, missing-document reviews, or history rows
+whose original proposal has already been deleted. These dependent rows cannot be
+inserted into the new foreign-key schema and are reported as skipped orphans.
+
+If a proposal's legacy user no longer exists, the proposal is retained and owned
+by the fallback Admin user. Unresolved activity authors remain NULL, while comments
+and replies use the fallback user because those tables require a user ID.
+
+
+STEP 6 - VERIFY AFTER THE MERGE
+-------------------------------
+1. Sign in and inspect Proposals, Funded Proposals, Analytics, and Monitoring.
+2. Open several imported proposals from each province and confirm dates, amounts,
+   status, comments, and history.
+3. Run the command again with --dry-run. Most rows should be reported as reused.
+4. Keep the backup and source SQL until the migration has been fully accepted.
+
+
+ROLLBACK
+--------
+The importer does not provide an automatic destructive rollback because it merges
+with live records. To return to the exact pre-merge state, restore the full path13
+backup made in Step 2. This replaces the database, so take another backup of the
+current state before performing a restore.
+
+
+CURRENT MIGRATION (24 AUGUST 2026)
+----------------------------------
+Source staging database: path_legacy_20260824
+Source dump: C:\Users\DOST 7 - TOD MIS\Downloads\path_old_staging.sql
+Pre-merge backup:
+C:\laragon\www\path-v3\backups\path13_pre_legacy_merge_20260824.sql

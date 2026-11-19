@@ -1,0 +1,5 @@
+@extends('errors.layout')
+@section('code', '403')
+@section('kicker', 'ACCESS RESTRICTED')
+@section('title', 'You cannot access this page.')
+@section('message', 'Your account does not have permission to view this area. Sign in with an authorized account or return to PATH.')

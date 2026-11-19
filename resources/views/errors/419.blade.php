@@ -1,0 +1,5 @@
+@extends('errors.layout')
+@section('code', '419')
+@section('kicker', 'SESSION EXPIRED')
+@section('title', 'Your session needs to be refreshed.')
+@section('message', 'For your security, the previous form can no longer be submitted. Return to PATH and try again.')

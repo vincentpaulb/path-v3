@@ -1,0 +1,1 @@
+@props(['value']) @php $k=strtolower(str_replace(' ','-', $value??'none')); @endphp <span class="status status-{{ $k }}">{{ $value ?: 'Not set' }}</span>
